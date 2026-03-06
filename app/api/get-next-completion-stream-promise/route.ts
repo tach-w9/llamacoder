@@ -2,7 +2,8 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaNeon } from "@prisma/adapter-neon";
 import { Pool } from "@neondatabase/serverless";
 import { z } from "zod";
-import Together from "together-ai";
+
+const baseUrl = "https://g4f.space/api/pollinations/chat/completions";
 
 function optimizeMessagesForTokens(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
@@ -33,7 +34,7 @@ export async function POST(req: Request) {
   const neon = new Pool({ connectionString: process.env.DATABASE_URL });
   const adapter = new PrismaNeon(neon);
   const prisma = new PrismaClient({ adapter });
-  const { messageId, model } = await req.json();
+  const { messageId } = await req.json();
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -63,28 +64,23 @@ export async function POST(req: Request) {
     messages = [messages[0], messages[1], messages[2], ...messages.slice(-7)];
   }
 
-  let options: ConstructorParameters<typeof Together>[0] = {};
-  if (process.env.HELICONE_API_KEY) {
-    options.baseURL = "https://together.helicone.ai/v1";
-    options.defaultHeaders = {
-      "Helicone-Auth": `Bearer ${process.env.HELICONE_API_KEY}`,
-      "Helicone-Property-appname": "LlamaCoder",
-      "Helicone-Session-Id": message.chatId,
-      "Helicone-Session-Name": "LlamaCoder Chat",
-    };
-  }
-
-  const together = new Together(options);
-
-  const res = await together.chat.completions.create({
-    model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    stream: true,
-    temperature: 0.4,
-    max_tokens: 9000,
+  const model: string = "openai-large";
+  const res = await fetch(baseUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      temperature: 0.4,
+      max_tokens: 9000,
+    }),
   });
 
-  return new Response(res.toReadableStream());
+  const data = await res.json();
+
+  return new Response(data.choices[0].message.content);
 }
 
 export const runtime = "edge";
